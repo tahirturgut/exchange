@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { User, Portfolio } = require('../models');
 const jwtConfig = require('../config/jwt');
 const { validateRegistration, validateLogin } = require('../utils/validators');
+const tradeService = require('./tradeService');
 
 const register = async (userData) => {
   const { errors, isValid } = validateRegistration(userData);
@@ -120,7 +121,56 @@ const login = async (loginData) => {
   }
 };
 
+const unregister = async (userId) => {
+  let transaction;
+  
+  try {
+    // Start transaction
+    transaction = await User.sequelize.transaction();
+    
+    // Find user
+    const user = await User.findByPk(userId, { transaction });
+    
+    if (!user) {
+      await transaction.rollback();
+      return {
+        success: false,
+        message: 'User not found'
+      };
+    }
+
+    // Delete portfolio first
+    const portfolioResult = await tradeService.deletePortfolio(userId, transaction);
+    
+    if (!portfolioResult.success) {
+      await transaction.rollback();
+      return portfolioResult;
+    }
+    
+    // Delete user
+    await user.destroy({ transaction });
+    
+    // Commit transaction
+    await transaction.commit();
+    
+    return {
+      success: true,
+      message: 'User account deleted successfully'
+    };
+  } catch (error) {
+    // Rollback on error
+    if (transaction) await transaction.rollback();
+    
+    return {
+      success: false,
+      message: 'Error deleting user account',
+      error: error.message
+    };
+  }
+};
+
 module.exports = {
   register,
-  login
+  login,
+  unregister
 }; 

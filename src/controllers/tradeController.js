@@ -77,10 +77,28 @@ const createPortfolio = async (req, res) => {
   }
 };
 
+const updatePortfolio = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await tradeService.updatePortfolio(req.body, userId);
+    
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Server error updating portfolio',
+      error: error.message
+    });
+  }
+};
+
 const updateSharePrice = async (req, res) => {
   try {
-    
-    const result = await tradeService.updateSharePrice(req.body);
+    const result = await tradeService.updateSharePrice(req.body, req.user);
     
     if (!result.success) {
       return res.status(400).json(result);
@@ -96,10 +114,31 @@ const updateSharePrice = async (req, res) => {
   }
 };
 
+const deletePortfolio = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await tradeService.deletePortfolio(userId);
+    
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Server error deleting portfolio',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   buyShares,
   sellShares,
   getPortfolioShares,
   createPortfolio,
-  updateSharePrice
+  updatePortfolio,
+  updateSharePrice,
+  deletePortfolio
 }; 

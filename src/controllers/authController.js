@@ -36,7 +36,27 @@ const login = async (req, res) => {
   }
 };
 
+const unregister = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await authService.unregister(userId);
+    
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Server error deleting account',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   register,
-  login
+  login,
+  unregister
 }; 

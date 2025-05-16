@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { User, Portfolio } = require('../src/models');
 const authService = require('../src/services/authService');
+const tradeService = require('../src/services/tradeService');
 const jwtConfig = require('../src/config/jwt');
 
 // Mock dependencies
@@ -12,13 +13,23 @@ jest.mock('../src/models', () => {
     email: 'test@example.com',
     password: 'hashedpassword',
     role: 'user',
-    comparePassword: jest.fn()
+    comparePassword: jest.fn(),
+    destroy: jest.fn().mockResolvedValue(true)
+  };
+  
+  const mockSequelize = {
+    transaction: jest.fn().mockImplementation(() => ({
+      commit: jest.fn().mockResolvedValue(),
+      rollback: jest.fn().mockResolvedValue()
+    }))
   };
   
   return {
     User: {
       findOne: jest.fn(),
-      create: jest.fn().mockResolvedValue(mockUser)
+      findByPk: jest.fn().mockResolvedValue(mockUser),
+      create: jest.fn().mockResolvedValue(mockUser),
+      sequelize: mockSequelize
     },
     Portfolio: {
       create: jest.fn().mockResolvedValue({
@@ -30,6 +41,10 @@ jest.mock('../src/models', () => {
     }
   };
 });
+
+jest.mock('../src/services/tradeService', () => ({
+  deletePortfolio: jest.fn()
+}));
 
 jest.mock('jsonwebtoken', () => ({
   sign: jest.fn().mockReturnValue('mock-token')
@@ -184,6 +199,52 @@ describe('Authentication Service', () => {
       expect(result.success).toBe(false);
       expect(result.errors.login).toBeDefined();
       expect(result.errors.password).toBeDefined();
+    });
+  });
+  
+  describe('unregister', () => {
+    const userId = 1;
+    
+    it('should unregister a user successfully', async () => {
+      // Mock successful portfolio deletion
+      tradeService.deletePortfolio.mockResolvedValue({
+        success: true,
+        message: 'Portfolio deleted successfully'
+      });
+      
+      const result = await authService.unregister(userId);
+      
+      expect(User.findByPk).toHaveBeenCalledWith(userId, expect.anything());
+      expect(tradeService.deletePortfolio).toHaveBeenCalledWith(userId, expect.anything());
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('User account deleted successfully');
+    });
+    
+    it('should return error when user not found', async () => {
+      // Mock user not found
+      User.findByPk.mockResolvedValueOnce(null);
+      
+      const result = await authService.unregister(userId);
+      
+      expect(User.findByPk).toHaveBeenCalledWith(userId, expect.anything());
+      expect(tradeService.deletePortfolio).not.toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('User not found');
+    });
+    
+    it('should return error when portfolio deletion fails', async () => {
+      // Mock portfolio deletion failure
+      tradeService.deletePortfolio.mockResolvedValueOnce({
+        success: false,
+        message: 'Error deleting portfolio'
+      });
+      
+      const result = await authService.unregister(userId);
+      
+      expect(User.findByPk).toHaveBeenCalledWith(userId, expect.anything());
+      expect(tradeService.deletePortfolio).toHaveBeenCalledWith(userId, expect.anything());
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Error deleting portfolio');
     });
   });
 }); 

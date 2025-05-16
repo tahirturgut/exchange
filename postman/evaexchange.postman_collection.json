@@ -78,6 +78,77 @@
             "description": "Login and get JWT token"
           },
           "response": []
+        },
+        {
+          "name": "Login as Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.token) {",
+                  "    pm.environment.set(\"adminToken\", jsonData.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Login as admin and get JWT token"
+          },
+          "response": []
+        },
+        {
+          "name": "Unregister",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{authToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/unregister",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "unregister"
+              ]
+            },
+            "description": "Delete user account with all associated data"
+          },
+          "response": []
         }
       ],
       "description": "Authentication endpoints for user registration and login"
@@ -107,7 +178,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"My Investment Portfolio\",\n  \"initialBalance\": 10000\n}"
+              "raw": "{\n  \"name\": \"My Investment Portfolio\",\n  \"initialBalance\": 10000,\n  \"initialShares\": [\n    {\n      \"symbol\": \"ABC\",\n      \"quantity\": 5\n    },\n    {\n      \"symbol\": \"XYZ\",\n      \"quantity\": 3\n    }\n  ]\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/trade/portfolio",
@@ -119,7 +190,74 @@
                 "portfolio"
               ]
             },
-            "description": "Create a new portfolio for the user (required before trading)"
+            "description": "Create a new portfolio for the user with optional initial shares"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Portfolio",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{authToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Portfolio Name\",\n  \"newBalance\": \"5000\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/trade/portfolio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "trade",
+                "portfolio"
+              ]
+            },
+            "description": "Update an existing portfolio (name and/or balance)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Portfolio",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{authToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/trade/portfolio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "trade",
+                "portfolio"
+              ]
+            },
+            "description": "Delete user's portfolio including all shares and trade history"
           },
           "response": []
         },
@@ -229,14 +367,14 @@
           "response": []
         },
         {
-          "name": "Update Share Prices",
+          "name": "Update Share Prices (Admin)",
           "request": {
             "auth": {
               "type": "bearer",
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{authToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -262,7 +400,7 @@
                 "update-prices"
               ]
             },
-            "description": "Update share prices"
+            "description": "Update share prices (admin only)"
           },
           "response": []
         }

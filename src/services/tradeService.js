@@ -1,6 +1,15 @@
 const { Op } = require('sequelize');
 const { Portfolio, Share, Trade, PortfolioShare, sequelize } = require('../models');
-const { validateTradeRequest, validatePortfolioCreation, validateSharePriceUpdate } = require('../utils/validators');
+const { validateTradeRequest, validatePortfolioCreation, validatePortfolioUpdate, validateSharePriceUpdate } = require('../utils/validators');
+const isAdmin = require('../middleware/isAdmin');
+
+const PORTFOLIO_NOT_FOUND = 'Portfolio not found';
+const SHARE_NOT_FOUND = 'Share not found';
+const PORTFOLIO_UPDATED_SUCCESSFULLY = 'Portfolio updated successfully';
+const PORTFOLIO_CREATED_SUCCESSFULLY = 'Portfolio created successfully';
+const PORTFOLIO_CREATION_ERROR = 'Error creating portfolio';
+const PORTFOLIO_UPDATE_ERROR = 'Error updating portfolio';
+const SHARE_PRICE_UPDATE_ERROR = 'Error updating share price';
 
 const buyShares = async (buyData, userId) => {
   const { errors, isValid } = validateTradeRequest(buyData);
@@ -27,7 +36,7 @@ const buyShares = async (buyData, userId) => {
       await transaction.rollback();
       return { 
         success: false, 
-        message: 'Portfolio not found or not owned by the user'
+        message: PORTFOLIO_NOT_FOUND
       };
     }
 
@@ -43,7 +52,7 @@ const buyShares = async (buyData, userId) => {
       await transaction.rollback();
       return { 
         success: false, 
-        message: 'Share not found'
+        message: SHARE_NOT_FOUND
       };
     }
     
@@ -127,8 +136,14 @@ const buyShares = async (buyData, userId) => {
       }
     };
   } catch (error) {
-    // Rollback transaction on error
-    if (transaction) await transaction.rollback();
+    // Rollback on error, but only if the transaction hasn't been committed yet
+    if (transaction && transaction.finished !== 'commit') {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error('Rollback error:', rollbackError);
+      }
+    }
     
     return {
       success: false,
@@ -163,7 +178,7 @@ const sellShares = async (sellData, userId) => {
       await transaction.rollback();
       return { 
         success: false, 
-        message: 'Portfolio not found or not owned by the user'
+        message: PORTFOLIO_NOT_FOUND
       };
     }
     
@@ -179,7 +194,7 @@ const sellShares = async (sellData, userId) => {
       await transaction.rollback();
       return { 
         success: false, 
-        message: 'Share not found'
+        message: SHARE_NOT_FOUND
       };
     }
 
@@ -255,8 +270,14 @@ const sellShares = async (sellData, userId) => {
       }
     };
   } catch (error) {
-    // Rollback transaction on error
-    if (transaction) await transaction.rollback();
+    // Rollback on error, but only if the transaction hasn't been committed yet
+    if (transaction && transaction.finished !== 'commit') {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error('Rollback error:', rollbackError);
+      }
+    }
     
     return {
       success: false,
@@ -278,7 +299,7 @@ const getPortfolioShares = async (userId) => {
     if (!portfolio) {
       return { 
         success: false, 
-        message: 'Portfolio not found for this user'
+        message: PORTFOLIO_NOT_FOUND
       };
     }
     
@@ -333,13 +354,20 @@ const createPortfolio = async (portfolioData, userId) => {
     return { success: false, errors };
   }
   
+  let transaction;
+  
   try {
+    // Start transaction
+    transaction = await sequelize.transaction();
+    
     // Check if user already has a portfolio
     const existingPortfolio = await Portfolio.findOne({
-      where: { userId }
+      where: { userId },
+      transaction
     });
     
     if (existingPortfolio) {
+      await transaction.rollback();
       return {
         success: false,
         message: 'User already has a portfolio'
@@ -351,9 +379,42 @@ const createPortfolio = async (portfolioData, userId) => {
       userId,
       name: portfolioData.name || 'My Portfolio',
       balance: portfolioData.initialBalance || 10000.00
-    });
+    }, { transaction });
     
-    return {
+    // Process initial shares if provided
+    const initialSharesResult = { processed: 0, errors: [] };
+    
+    if (portfolioData.initialShares && Array.isArray(portfolioData.initialShares) && portfolioData.initialShares.length > 0) {
+      for (const shareData of portfolioData.initialShares) {
+        // Find the share
+        const share = await Share.findOne({
+          where: { symbol: shareData.symbol },
+          transaction
+        });
+        
+        if (!share) {
+          initialSharesResult.errors.push({
+            symbol: shareData.symbol,
+            error: SHARE_NOT_FOUND
+          });
+          continue;
+        }
+        
+        // Create portfolio share entry
+        await PortfolioShare.create({
+          portfolioId: portfolio.id,
+          shareId: share.id,
+          quantity: parseInt(shareData.quantity)
+        }, { transaction });
+        
+        initialSharesResult.processed++;
+      }
+    }
+    
+    // Commit transaction
+    await transaction.commit();
+    
+    const result = {
       success: true,
       message: 'Portfolio created successfully',
       portfolio: {
@@ -362,7 +423,26 @@ const createPortfolio = async (portfolioData, userId) => {
         balance: portfolio.balance
       }
     };
+    
+    // Include initial shares info if any were processed
+    if (initialSharesResult.processed > 0) {
+      result.initialShares = {
+        processed: initialSharesResult.processed,
+        errors: initialSharesResult.errors.length > 0 ? initialSharesResult.errors : undefined
+      };
+    }
+    
+    return result;
   } catch (error) {
+    // Rollback on error, but only if the transaction hasn't been committed yet
+    if (transaction && transaction.finished !== 'commit') {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error('Rollback error:', rollbackError);
+      }
+    }
+    
     return {
       success: false,
       message: 'Error creating portfolio',
@@ -371,13 +451,94 @@ const createPortfolio = async (portfolioData, userId) => {
   }
 };
 
-const updateSharePrice = async (priceData) => {
-  const { errors, isValid } = validateSharePriceUpdate(priceData);
+const updatePortfolio = async (updateData, userId) => {
+  const { errors, isValid } = validatePortfolioUpdate(updateData);
   
   if (!isValid) {
     return { success: false, errors };
   }
   
+  let transaction;
+  
+  try {
+    // Start transaction
+    transaction = await sequelize.transaction();
+    
+    // Find user's portfolio
+    const portfolio = await Portfolio.findOne({
+      where: { userId },
+      transaction
+    });
+    
+    if (!portfolio) {
+      await transaction.rollback();
+      return {
+        success: false,
+        message: PORTFOLIO_NOT_FOUND
+      };
+    }
+    
+    // Update fields if provided
+    const updates = {};
+    
+    if (updateData.name) {
+      updates.name = updateData.name;
+    }
+    
+    if (updateData.newBalance !== undefined) {
+      if (updateData.newBalance < 0) {
+        await transaction.rollback();
+        return {
+          success: false,
+          message: 'Balance cannot be negative'
+        };
+      }
+      
+      updates.balance = updateData.newBalance;
+    }
+    
+    // Apply updates if any
+    if (Object.keys(updates).length > 0) {
+      await portfolio.update(updates, { transaction });
+    }
+    
+    // Commit transaction
+    await transaction.commit();
+    
+    return {
+      success: true,
+      message: 'Portfolio updated successfully',
+      portfolio: {
+        id: portfolio.id,
+        name: portfolio.name,
+        balance: portfolio.balance
+      }
+    };
+  } catch (error) {
+    // Rollback on error, but only if the transaction hasn't been committed yet
+    if (transaction && transaction.finished !== 'commit') {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error('Rollback error:', rollbackError);
+      }
+    }
+    
+    return {
+      success: false,
+      message: 'Error updating portfolio',
+      error: error.message
+    };
+  }
+};
+
+const updateSharePrice = async (priceData, user) => {
+  const { errors, isValid } = validateSharePriceUpdate(priceData);
+  
+  if (!isValid) {
+    return { success: false, errors };
+  }
+
   let transaction;
   
   try {
@@ -416,12 +577,83 @@ const updateSharePrice = async (priceData) => {
       message: `Successfully updated ${updatePromises.length} share prices`
     };
   } catch (error) {
-    // Rollback on error
-    if (transaction) await transaction.rollback();
+    // Rollback on error, but only if the transaction hasn't been committed yet
+    if (transaction && transaction.finished !== 'commit') {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error('Rollback error:', rollbackError);
+      }
+    }
     
     return {
       success: false,
-      message: 'Error updating share prices',
+      message: SHARE_PRICE_UPDATE_ERROR,
+      error: error.message
+    };
+  }
+};
+
+const deletePortfolio = async (userId, existingTransaction = null) => {
+  let transaction = existingTransaction;
+  let shouldCommit = false;
+  
+  try {
+    // Start transaction if one wasn't provided
+    if (!transaction) {
+      transaction = await sequelize.transaction();
+      shouldCommit = true;
+    }
+    
+    // Find the portfolio
+    const portfolio = await Portfolio.findOne({
+      where: { userId },
+      transaction
+    });
+    
+    if (!portfolio) {
+      if (shouldCommit) await transaction.rollback();
+      return {
+        success: false,
+        message: PORTFOLIO_NOT_FOUND
+      };
+    }
+    
+    // Delete portfolio shares
+    await PortfolioShare.destroy({
+      where: { portfolioId: portfolio.id },
+      transaction
+    });
+    
+    // Delete trades
+    await Trade.destroy({
+      where: { portfolioId: portfolio.id },
+      transaction
+    });
+    
+    // Delete portfolio
+    await portfolio.destroy({ transaction });
+    
+    // Commit transaction if we started it
+    if (shouldCommit) await transaction.commit();
+    
+    return {
+      success: true,
+      message: 'Portfolio deleted successfully'
+    };
+  } catch (error) {
+    // Only rollback if we started the transaction and it hasn't been committed yet
+    if (shouldCommit && transaction && transaction.finished !== 'commit') {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error('Rollback error:', rollbackError);
+      }
+    }
+    
+    return {
+      success: false,
+      message: 'Error deleting portfolio',
       error: error.message
     };
   }
@@ -432,5 +664,7 @@ module.exports = {
   sellShares,
   getPortfolioShares,
   createPortfolio,
-  updateSharePrice
+  updatePortfolio,
+  updateSharePrice,
+  deletePortfolio
 }; 

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const tradeController = require('../controllers/tradeController');
 const authenticate = require('../middleware/authenticate');
+const isAdmin = require('../middleware/isAdmin');
 
 // All trade routes require authentication
 router.use(authenticate);
@@ -12,6 +13,13 @@ router.use(authenticate);
  * @access  Private
  */
 router.post('/portfolio', tradeController.createPortfolio);
+
+/**
+ * @route   PUT /trade/portfolio
+ * @desc    Update an existing portfolio
+ * @access  Private
+ */
+router.put('/portfolio', tradeController.updatePortfolio);
 
 /**
  * @route   POST /trade/buy
@@ -36,9 +44,16 @@ router.get('/portfolio', tradeController.getPortfolioShares);
 
 /**
  * @route   POST /trade/update-prices
- * @desc    Update share prices
+ * @desc    Update share prices (admin only)
+ * @access  Private (Admin)
+ */
+router.post('/update-prices', isAdmin, tradeController.updateSharePrice);
+
+/**
+ * @route   DELETE /trade/portfolio
+ * @desc    Delete user's portfolio
  * @access  Private
  */
-router.post('/update-prices', tradeController.updateSharePrice);
+router.delete('/portfolio', tradeController.deletePortfolio);
 
 module.exports = router; 

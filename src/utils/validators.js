@@ -86,6 +86,58 @@ const validatePortfolioCreation = (data) => {
     }
   }
 
+  // Initial shares validation (optional)
+  if (data.initialShares) {
+    if (!Array.isArray(data.initialShares)) {
+      errors.initialShares = 'Initial shares must be an array';
+    } else {
+      const shareErrors = [];
+      
+      data.initialShares.forEach((share, index) => {
+        const itemErrors = {};
+        
+        if (!share.symbol) {
+          itemErrors.symbol = 'Symbol is required';
+        }
+        
+        if (!share.quantity) {
+          itemErrors.quantity = 'Quantity is required';
+        } else if (isNaN(share.quantity) || parseInt(share.quantity) <= 0) {
+          itemErrors.quantity = 'Quantity must be a positive integer';
+        }
+        
+        if (Object.keys(itemErrors).length > 0) {
+          shareErrors.push({ index, errors: itemErrors });
+        }
+      });
+      
+      if (shareErrors.length > 0) {
+        errors.initialShares = shareErrors;
+      }
+    }
+  }
+
+  return {
+    errors,
+    isValid: Object.keys(errors).length === 0
+  };
+};
+
+const validatePortfolioUpdate = (data) => {
+  const errors = {};
+
+  // Name validation (optional field)
+  if (data.name && (data.name.length < 3 || data.name.length > 50)) {
+    errors.name = 'Portfolio name must be between 3 and 50 characters';
+  }
+
+  // Balance adjustment validation (optional field)
+  if (data.newBalance) {
+    if (isNaN(data.newBalance)) {
+      errors.newBalance = 'Balance must be a number';
+    }
+  }
+
   return {
     errors,
     isValid: Object.keys(errors).length === 0
@@ -134,5 +186,6 @@ module.exports = {
   validateLogin,
   validateTradeRequest,
   validatePortfolioCreation,
+  validatePortfolioUpdate,
   validateSharePriceUpdate
 }; 
